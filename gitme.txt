@@ -1,0 +1,355 @@
+const { ethers } = require("ethers");
+const readline = require('readline');
+const Buffer = require('buffer').Buffer;
+
+// ASCII color codes
+const RED = "\x1b[31m";
+const GREEN = "\x1b[32m";
+const YELLOW = "\x1b[33m";
+const BLUE = "\x1b[34m";
+const MAGENTA = "\x1b[35m";
+const CYAN = "\x1b[36m";
+const RESET = "\x1b[0m";
+const BOLD = "\x1b[1m";
+
+
+const CONTRACT_ADDRESS = "0x5FbE74A283f7954f10AA04C2eDf55578811aeb03";
+const USDC_ADDRESS = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"; // USDC on Sepolia
+const WETH_ADDRESS = "0x94373a4919B3240D86eA41593D5eBa789FEF3848"; // WETH on Holesky
+
+// You can change RPC if you want
+const NETWORK_CONFIG = {
+  "Sepolia": {
+    rpc: "https://sepolia.drpc.org",
+    explorer: "https://sepolia.etherscan.io/tx/"
+  },
+  "Holesky": {
+    rpc: "https://1rpc.io/holesky",
+    explorer: "https://holesky.etherscan.io/tx/"
+  }
+};
+
+const ERC20_ABI = [
+  {
+    "constant": true,
+    "inputs": [{ "name": "account", "type": "address" }],
+    "name": "balanceOf",
+    "outputs": [{ "name": "", "type": "uint256" }],
+    "type": "function",
+    "stateMutability": "view"
+  },
+  {
+    "constant": true,
+    "inputs": [
+      { "name": "owner", "type": "address" },
+      { "name": "spender", "type": "address" }
+    ],
+    "name": "allowance",
+    "outputs": [{ "name": "", "type": "uint256" }],
+    "type": "function",
+    "stateMutability": "view"
+  },
+  {
+    "constant": false,
+    "inputs": [
+      { "name": "spender", "type": "address" },
+      { "name": "value", "type": "uint256" }
+    ],
+    "name": "approve",
+    "outputs": [{ "name": "", "type": "bool" }],
+    "type": "function",
+    "stateMutability": "nonpayable"
+  }
+];
+
+const CONTRACT_ABI = [
+  {
+    "inputs": [
+      { "internalType": "uint32", "name": "channelId", "type": "uint32" },
+      { "internalType": "uint64", "name": "timeoutHeight", "type": "uint64" },
+      { "internalType": "uint64", "name": "timeoutTimestamp", "type": "uint64" },
+      { "internalType": "bytes32", "name": "salt", "type": "bytes32" },
+      {
+        "components": [
+          { "internalType": "uint8", "name": "version", "type": "uint8" },
+          { "internalType": "uint8", "name": "opcode", "type": "uint8" },
+          { "internalType": "bytes", "name": "operand", "type": "bytes" }
+        ],
+        "internalType": "struct Instruction",
+        "name": "instruction",
+        "type": "tuple"
+      }
+    ],
+    "name": "send",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+];
+
+const OPERAND_SEPOLIA_BABYLON = `0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001e00000000000000000000000000000000000000000000000000000000000000064000000000000000000000000000000000000000000000000000000000000022000000000000000000000000000000000000000000000000000000000000002600000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a000000000000000000000000000000000000000000000000000000000000000640000000000000000000000000000000000000000000000000000000000000014{SENDER}000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a{RECIPIENT}0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000141c7d4b196cb0c7b01d743fbc6116a902379c72380000000000000000000000000000000000000000000000000000000000000000000000000000000000000004555344430000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000045553444300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003e62626e317a7372763233616b6b6778646e77756c3732736674677632786a74356b68736e743377776a687030666668363833687a7035617135613068366e0000`;
+
+const OPERAND_SEPOLIA_HOLESKY = `0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000002c00000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000000640000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000024000000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000000640000000000000000000000000000000000000000000000000000000000000014{SENDER}0000000000000000000000000000000000000000000000000000000000000000000000000000000000000014{RECIPIENT}00000000000000000000000000000000000000000000000000000000000000000000000000000000000000141c7d4b196cb0c7b01d743fbc6116a902379c72380000000000000000000000000000000000000000000000000000000000000000000000000000000000000004555344430000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000045553444300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001457978bfe465ad9b1c0bf80f6c1539d300705ea50000000000000000000000000`;
+
+const OPERAND_HOLESKY_BABYLON = `0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000005af3107a4000000000000000000000000000000000000000000000000000000000000000022000000000000000000000000000000000000000000000000000000000000002600000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a000000000000000000000000000000000000000000000000000005af3107a40000000000000000000000000000000000000000000000000000000000000000014{SENDER}000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a{RECIPIENT}00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001494373a4919b3240d86ea41593d5eba789fef384800000000000000000000000000000000000000000000000000000000000000000000000000000000000000045745544800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000d5772617070656420457468657200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003e62626e31686e756470353336706d7134726d32666a357a68366635737264646c32353366767a7a357470306d6b6b68707738726b7733757170786b6c336b0000`;
+
+const OPERAND_HOLESKY_SEPOLIA = `0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000002c00000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000005af3107a40000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000024000000000000000000000000000000000000000000000000000000000000000120000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000005af3107a40000000000000000000000000000000000000000000000000000000000000000014{SENDER}0000000000000000000000000000000000000000000000000000000000000000000000000000000000000014{RECIPIENT}000000000000000000000000000000000000000000000000000000000000000000000000000000000000001494373a4919b3240d86ea41593d5eba789fef384800000000000000000000000000000000000000000000000000000000000000000000000000000000000000045745544800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000d577261707065642045746865720000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000141a92b29dbc16e1ba9c02973fab1f7755a2786de1000000000000000000000000`;
+
+const OPERAND_HOLESKY_XION = `0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000005af3107a4000000000000000000000000000000000000000000000000000000000000000022000000000000000000000000000000000000000000000000000000000000002600000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a000000000000000000000000000000000000000000000000000005af3107a40000000000000000000000000000000000000000000000000000000000000000014{SENDER}000000000000000000000000000000000000000000000000000000000000000000000000000000000000002b{RECIPIENT}000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001494373a4919b3240d86ea41593d5eba789fef384800000000000000000000000000000000000000000000000000000000000000000000000000000000000000045745544800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000d5772617070656420457468657200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003f78696f6e31703863656167737466616c30797330716c3967666564707138393572676a717779616d686c6c30796b76773472366a70356c6c733570346c776300`;
+
+const BRIDGES = [
+  {
+    name: "Sepolia to Babylon (USDC)",
+    sourceNetwork: "Sepolia",
+    destinationNetwork: "Babylon",
+    channelId: 7,
+    tokenAddress: USDC_ADDRESS,
+    tokenName: "USDC",
+    recipientPrompt: "Enter your Babylon address: ",
+    operandTemplate: OPERAND_SEPOLIA_BABYLON,
+    recipientEncoder: (recipient) => Buffer.from(recipient, "utf8").toString("hex"),
+    validateRecipient: (recipient) => recipient.trim() !== ""
+  },
+  {
+    name: "Sepolia to Holesky (USDC)",
+    sourceNetwork: "Sepolia",
+    destinationNetwork: "Holesky",
+    channelId: 8,
+    tokenAddress: USDC_ADDRESS,
+    tokenName: "USDC",
+    recipientPrompt: "Enter your Holesky address: ",
+    operandTemplate: OPERAND_SEPOLIA_HOLESKY,
+    recipientEncoder: (recipient) => recipient.slice(2),
+    validateRecipient: (recipient) => ethers.isAddress(recipient)
+  },
+  {
+    name: "Holesky to Babylon (WETH)",
+    sourceNetwork: "Holesky",
+    destinationNetwork: "Babylon",
+    channelId: 3,
+    tokenAddress: WETH_ADDRESS,
+    tokenName: "WETH",
+    recipientPrompt: "Enter your Babylon address: ",
+    operandTemplate: OPERAND_HOLESKY_BABYLON,
+    recipientEncoder: (recipient) => Buffer.from(recipient, "utf8").toString("hex"),
+    validateRecipient: (recipient) => recipient.trim() !== ""
+  },
+  {
+    name: "Holesky to Sepolia (WETH)",
+    sourceNetwork: "Holesky",
+    destinationNetwork: "Sepolia",
+    channelId: 2,
+    tokenAddress: WETH_ADDRESS,
+    tokenName: "WETH",
+    recipientPrompt: "Enter your Sepolia address: ",
+    operandTemplate: OPERAND_HOLESKY_SEPOLIA,
+    recipientEncoder: (recipient) => recipient.slice(2),
+    validateRecipient: (recipient) => ethers.isAddress(recipient)
+  },
+  {
+    name: "Holesky to Xion (WETH)",
+    sourceNetwork: "Holesky",
+    destinationNetwork: "Xion",
+    channelId: 4,
+    tokenAddress: WETH_ADDRESS,
+    tokenName: "WETH",
+    recipientPrompt: "Enter your Xion address: ",
+    operandTemplate: OPERAND_HOLESKY_XION,
+    recipientEncoder: (recipient) => Buffer.from(recipient, "utf8").toString("hex"),
+    validateRecipient: (recipient) => recipient.trim() !== ""
+  }
+];
+
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+function askQuestion(query) {
+  return new Promise(resolve => rl.question(query, resolve));
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function checkBalanceAndApproveToken(wallet, tokenAddress, tokenName, spenderAddress, bridge) {
+  const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
+  
+  const balance = await tokenContract.balanceOf(wallet.address);
+  if (balance === 0n) {
+    console.log(`${RED}${BOLD}[!]${RESET} ${wallet.address} has 0 ${tokenName}. Please claim faucet first at https://faucet.circle.com`);
+    return false;
+  }
+
+  const allowance = await tokenContract.allowance(wallet.address, spenderAddress);
+  if (allowance === 0n) {
+    console.log(`${YELLOW}${BOLD}[>]${RESET} ${tokenName} is not approved. Sending approve transaction...`);
+    const approveAmount = ethers.MaxUint256;
+    try {
+      const gasPrice = await getHigherGasPrice(wallet.provider);
+      const tx = await tokenContract.approve(spenderAddress, approveAmount, { gasPrice });
+      console.log(`${GREEN}${BOLD}[✓]${RESET} Approve transaction submitted: ${NETWORK_CONFIG[bridge.sourceNetwork].explorer}${tx.hash}`);
+      await delay(3000);
+    } catch (err) {
+      console.error(`${RED}${BOLD}[✗]${RESET} Approve failed:`, err.message);
+      return false;
+    }
+  } else {
+    console.log(`${GREEN}${BOLD}[✓]${RESET} ${tokenName} already approved for spending`);
+  }
+  return true;
+}
+
+async function getHigherGasPrice(provider) {
+  const currentGasPrice = await provider.getFeeData();
+  const gasPriceGwei = ethers.formatUnits(currentGasPrice.gasPrice, "gwei");
+  const increasedGasPrice = Math.ceil(parseFloat(gasPriceGwei)) + 4;
+  console.log(`${CYAN}${BOLD}[●]${RESET} Current gas price: ${gasPriceGwei} GWEI, Using: ${increasedGasPrice} GWEI`);
+  return ethers.parseUnits(increasedGasPrice.toString(), "gwei");
+}
+
+async function performBridgeTransactions(bridge, privateKey, recipient, numTransactions, useRandomDelay, maxDelaySeconds) {
+  try {
+    const provider = new ethers.JsonRpcProvider(NETWORK_CONFIG[bridge.sourceNetwork].rpc);
+    const wallet = new ethers.Wallet(privateKey, provider);
+    const senderHex = wallet.address.slice(2);
+
+    console.log(`${BLUE}${BOLD}[→]${RESET} Sending ${numTransactions} Transaction${numTransactions > 1 ? 's' : ''} from ${bridge.sourceNetwork} → ${bridge.destinationNetwork}`);
+    console.log(`${MAGENTA}${BOLD}[♦]${RESET} From address: ${wallet.address}`);
+    console.log(`${MAGENTA}${BOLD}[♦]${RESET} To ${bridge.destinationNetwork} address: ${recipient}`);
+    console.log();
+
+    const shouldProceed = await checkBalanceAndApproveToken(wallet, bridge.tokenAddress, bridge.tokenName, CONTRACT_ADDRESS, bridge);
+    if (!shouldProceed) {
+      console.log(`${RED}${BOLD}[✗]${RESET} Cannot proceed without ${bridge.tokenName} balance and approval`);
+      return;
+    }
+    console.log();
+
+    const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
+    const recipientEncoded = bridge.recipientEncoder(recipient);
+    const operand = bridge.operandTemplate.replace("{SENDER}", senderHex).replace("{RECIPIENT}", recipientEncoded);
+
+    const instruction = {
+      version: 0,
+      opcode: 2,
+      operand: operand
+    };
+
+    for (let i = 1; i <= numTransactions; i++) {
+      let delayTime = 0;
+      if (useRandomDelay && maxDelaySeconds > 0) {
+        delayTime = Math.floor(Math.random() * (maxDelaySeconds * 1000));
+        if (i > 1) {
+          console.log(`${YELLOW}${BOLD}[⏱]${RESET} Waiting ${delayTime}ms before next transaction...`);
+          console.log();
+          await delay(delayTime);
+        }
+      }
+
+      console.log(`${BLUE}${BOLD}[→]${RESET} Transaction ${i}/${numTransactions}`);
+
+      const timestampNow = Math.floor(Date.now() / 1000);
+      const salt = ethers.keccak256(
+        ethers.solidityPacked(["address", "uint256"], [wallet.address, timestampNow])
+      );
+
+      const now = BigInt(Date.now()) * 1_000_000n;
+      const oneDayNs = 86_400_000_000_000n;
+      const timeoutTimestamp = (now + oneDayNs).toString();
+
+      try {
+        const gasPrice = await getHigherGasPrice(wallet.provider);
+        const tx = await contract.send(bridge.channelId, 0, timeoutTimestamp, salt, instruction, { gasPrice });
+        console.log(`${GREEN}${BOLD}[✓] Transaction ${i} submitted.${RESET}`);
+        console.log(`${CYAN}[+] ${bridge.sourceNetwork} Explorer: ${NETWORK_CONFIG[bridge.sourceNetwork].explorer}${tx.hash}${RESET}`);
+      } catch (err) {
+        console.error(`${RED}${BOLD}[✗]${RESET} Transaction ${i} failed:`, err.message);
+      }
+
+      console.log();
+    }
+
+    console.log(`${YELLOW}${BOLD}[🎉]${RESET} All transactions submitted`);
+
+  } catch (err) {
+    console.error(`${RED}${BOLD}[✗]${RESET} Fatal error:`, err.message);
+  }
+}
+
+async function main() {
+  try {
+    console.log(CYAN);
+    console.log("███████╗██╗   ██╗███╗   ██╗    ███████╗ ██████╗██████╗ ██╗██████╗ ████████╗");
+    console.log("╚══███╔╝██║   ██║████╗  ██║    ██╔════╝██╔════╝██╔══██╗██║██╔══██╗╚══██╔══╝");
+    console.log("  ███╔╝ ██║   ██║██╔██╗ ██║    ███████╗██║     ██████╔╝██║██████╔╝   ██║   ");
+    console.log(" ███╔╝  ██║   ██║██║╚██╗██║    ╚════██║██║     ██╔══██╗██║██╔═══╝    ██║   ");
+    console.log("███████╗╚██████╔╝██║ ╚████║    ███████║╚██████╗██║  ██║██║██║        ██║   ");
+    console.log("╚══════╝ ╚═════╝ ╚═╝  ╚═══╝    ╚══════╝ ╚═════╝╚═╝  ╚═╝╚═╝╚═╝        ╚═╝   ");
+    console.log(RESET);
+    console.log(`${BLUE}${BOLD}Union Bridge Transaction Tool${RESET}`);
+    console.log();
+
+    console.log("Available bridges:");
+    BRIDGES.forEach((bridge, index) => {
+      console.log(`${index + 1}. ${bridge.name}`);
+    });
+    
+    console.log();
+    const bridgeIndex = parseInt(await askQuestion("Select bridge number: ")) - 1;
+    if (isNaN(bridgeIndex) || bridgeIndex < 0 || bridgeIndex >= BRIDGES.length) {
+      console.log(`${RED}${BOLD}[✗]${RESET} Invalid selection`);
+      rl.close();
+      return;
+    }
+
+    const selectedBridge = BRIDGES[bridgeIndex];
+
+    const txCountInput = await askQuestion("Enter number of transactions to perform: ");
+    const txCount = parseInt(txCountInput);
+    if (isNaN(txCount) || txCount <= 0) {
+      console.log(`${RED}${BOLD}[✗]${RESET} Invalid transaction count. Please enter a positive number.`);
+      rl.close();
+      return;
+    }
+
+    const recipient = await askQuestion(selectedBridge.recipientPrompt);
+    if (!selectedBridge.validateRecipient(recipient)) {
+      console.log(`${RED}${BOLD}[✗]${RESET} Invalid recipient address for ${selectedBridge.destinationNetwork}.`);
+      rl.close();
+      return;
+    }
+
+    const privateKey = await askQuestion(`Enter your ${selectedBridge.sourceNetwork} private key (starts with 0x): `);
+    if (!privateKey || !privateKey.startsWith("0x") || privateKey.length !== 66) {
+      console.log(`${RED}${BOLD}[✗]${RESET} Invalid private key format. It should start with 0x and be 66 characters long.`);
+      rl.close();
+      return;
+    }
+
+    const useRandomDelayInput = await askQuestion("Add random delay between transactions? (y/n): ");
+    const useRandomDelay = useRandomDelayInput.toLowerCase() === "y";
+
+    let maxDelaySeconds = 0;
+    if (useRandomDelay) {
+      const maxDelayInput = await askQuestion("Enter maximum delay in seconds (e.g., 6 for 0-6 seconds): ");
+      maxDelaySeconds = parseInt(maxDelayInput);
+      if (isNaN(maxDelaySeconds) || maxDelaySeconds < 0) {
+        console.log(`${RED}${BOLD}[✗]${RESET} Invalid delay value. Using 0 seconds.`);
+        maxDelaySeconds = 0;
+      }
+    }
+
+    rl.close();
+    console.log();
+
+    await performBridgeTransactions(selectedBridge, privateKey, recipient, txCount, useRandomDelay, maxDelaySeconds);
+
+  } catch (error) {
+    console.error(`${RED}${BOLD}[✗]${RESET} Fatal error:`, error);
+    rl.close();
+  }
+}
+
+main().catch(console.error);
